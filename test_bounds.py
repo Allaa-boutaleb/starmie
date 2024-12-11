@@ -3,8 +3,8 @@ import pickle
 from bounds import verify, upper_bound_bm, lower_bound_bm
 
 
-tables = pickle.load(open("sherlock_datalake.pkl","rb"))
-queries = pickle.load(open("sherlock_toyQuery.pkl","rb"))
+tables = pickle.load(open("starmie_datalake_columns_santos.pkl","rb"))
+queries = pickle.load(open("starmie_query_columns_santos.pkl","rb"))
 
 query = queries[4]
 threshold = 0.6

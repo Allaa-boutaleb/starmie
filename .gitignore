@@ -1,2 +1,10 @@
 
 .DS_Store
+
+mlruns/
+data/
+output/
+vectors/
+results/
+**/__pycache__/**
+

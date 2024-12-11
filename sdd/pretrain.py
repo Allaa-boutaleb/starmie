@@ -7,6 +7,7 @@ import sklearn.metrics as metrics
 import mlflow
 import pandas as pd
 import os
+import time
 
 from .utils import evaluate_column_matching, evaluate_clustering
 from .model import BarlowTwinsSimCLR
@@ -32,7 +33,7 @@ def train_step(train_iter, model, optimizer, scheduler, scaler, hp):
     Returns:
         None
     """
-    for i, batch in enumerate(train_iter):
+    for i, batch in tqdm(enumerate(train_iter), total=len(train_iter), desc="Training"):
         x_ori, x_aug, cls_indices = batch
         optimizer.zero_grad()
 
@@ -63,6 +64,7 @@ def train(trainset, hp):
     Returns:
         The pre-trained table model
     """
+
     padder = trainset.pad
     # create the DataLoaders
     train_iter = data.DataLoader(dataset=trainset,
@@ -86,10 +88,20 @@ def train(trainset, hp):
                                                 num_warmup_steps=0,
                                                 num_training_steps=num_steps)
 
+    start_time = time.time()  # Start timing
+    epoch_times = []  # Track individual epoch times
+    
     for epoch in range(1, hp.n_epochs+1):
+        epoch_start_time = time.time()
+        
         # train
         model.train()
         train_step(train_iter, model, optimizer, scheduler, scaler, hp)
+        
+        # Record epoch time
+        epoch_end_time = time.time()
+        epoch_time = epoch_end_time - epoch_start_time
+        epoch_times.append(epoch_time)
 
         # save the last checkpoint
         if hp.save_model and epoch == hp.n_epochs:
@@ -97,18 +109,68 @@ def train(trainset, hp):
             if not os.path.exists(directory):
                 os.makedirs(directory)
 
+            # Calculate training statistics
+            total_training_time = time.time() - start_time
+            average_epoch_time = sum(epoch_times) / len(epoch_times)
+            
+            # Get GPU memory usage
+            if torch.cuda.is_available():
+                peak_memory = torch.cuda.max_memory_allocated() / (1024 * 1024)  # Convert to MB
+            else:
+                peak_memory = 0
+                
+            # Get system info
+            import psutil
+            import datetime
+            
+            training_stats = {
+                "training_completed": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "average_epoch_time_seconds": average_epoch_time,
+                "total_training_time_seconds": total_training_time,
+                "peak_gpu_memory_mb": peak_memory,
+                "num_epochs": hp.n_epochs,
+                "epoch_times": epoch_times,
+                "system_info": {
+                    "cpu_count": psutil.cpu_count(),
+                    "total_ram_gb": psutil.virtual_memory().total / (1024**3),
+                    "gpu_available": torch.cuda.is_available(),
+                    "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
+                    "gpu_names": [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())] if torch.cuda.is_available() else []
+                }
+            }
+            
+            # Save training stats
+            if hp.single_column:
+                base_name = f'model_{hp.augment_op}_{hp.sample_meth}_{hp.table_order}_{hp.run_id}singleCol'
+            else:
+                base_name = f'model_{hp.augment_op}_{hp.sample_meth}_{hp.table_order}_{hp.run_id}'
+            
+            import json
+            stats_path = os.path.join(hp.logdir, hp.task, f'{base_name}_training_stats.json')
+            with open(stats_path, 'w') as f:
+                json.dump(training_stats, f, indent=2)
+
+            # Calculate total training time
+            training_time = time.time() - start_time
+
             # save the checkpoints for each component
             if hp.single_column:
-                ckpt_path = os.path.join(hp.logdir, hp.task, 'model_'+str(hp.augment_op)+'_'+str(hp.sample_meth)+'_'+str(hp.table_order)+'_'+str(hp.run_id)+'singleCol.pt')
+                base_name = f'model_{hp.augment_op}_{hp.sample_meth}_{hp.table_order}_{hp.run_id}singleCol'
             else:
-                ckpt_path = os.path.join(hp.logdir, hp.task, 'model_'+str(hp.augment_op)+'_'+str(hp.sample_meth)+'_'+str(hp.table_order)+'_'+str(hp.run_id)+'.pt')
+                base_name = f'model_{hp.augment_op}_{hp.sample_meth}_{hp.table_order}_{hp.run_id}'
+            
+            ckpt_path = os.path.join(hp.logdir, hp.task, f'{base_name}.pt')
+            time_path = os.path.join(hp.logdir, hp.task, f'{base_name}_training_time.txt')
 
+            # Save model checkpoint
             ckpt = {'model': model.state_dict(),
                     'hp': hp}
             torch.save(ckpt, ckpt_path)
 
-            # test loading checkpoints
-            # load_checkpoint(ckpt_path)
+            # Save training time
+            with open(time_path, 'w') as f:
+                f.write(f"Training time: {training_time:.2f} seconds")
+
         # intrinsic evaluation with column matching
         if hp.task in ['small', 'large']:
             # Train column matching models using the learned representations
@@ -136,7 +198,8 @@ def inference_on_tables(tables: List[pd.DataFrame],
                         model: BarlowTwinsSimCLR,
                         unlabeled: PretrainTableDataset,
                         batch_size=128,
-                        total=None):
+                        total=None,
+                        return_serialized=False):
     """Extract column vectors from a table.
 
     Args:
@@ -144,15 +207,37 @@ def inference_on_tables(tables: List[pd.DataFrame],
         model (BarlowTwinsSimCLR): the model to be evaluated
         unlabeled (PretrainTableDataset): the unlabeled dataset
         batch_size (optional): batch size for model inference
+        return_serialized (bool): whether to return serialized strings
 
     Returns:
         List of np.array: the column vectors
+        List of str (optional): the serialized strings with formatted column boundaries
     """
-    total=total if total is not None else len(tables)
+    total = total if total is not None else len(tables)
     batch = []
     results = []
+    serialized_strings = []
+
     for tid, table in tqdm(enumerate(tables), total=total):
         x, _ = unlabeled._tokenize(table)
+
+        if return_serialized:
+            # Get the raw decoded string
+            raw_string = unlabeled.tokenizer.decode(x, skip_special_tokens=False)
+            
+            # Split on CLS token and process each column
+            columns = raw_string.split(unlabeled.tokenizer.cls_token)
+            # Remove empty strings and strip whitespace
+            columns = [col.strip() for col in columns if col.strip()]
+            # Format each column's content with commas between tokens
+            formatted_columns = []
+            for col in columns:
+                tokens = [t.strip() for t in col.split() if t.strip()]
+                formatted_columns.append(", ".join(tokens))
+            # Join columns with visible <s> markers
+            formatted_string = "<s> " + " <s> ".join(formatted_columns)
+            
+            serialized_strings.append(formatted_string)
 
         batch.append((x, x, []))
         if tid == total - 1 or len(batch) == batch_size:
@@ -172,6 +257,8 @@ def inference_on_tables(tables: List[pd.DataFrame],
 
             batch.clear()
 
+    if return_serialized:
+        return results, serialized_strings
     return results
 
 
@@ -196,12 +283,11 @@ def load_checkpoint(ckpt):
     # dataset paths, depending on benchmark for the current task
     ds_path = 'data/santos/datalake'
     if hp.task == "santosLarge":
-        # Change the data paths to where the benchmarks are stored
         ds_path = 'data/santos-benchmark/real-benchmark/datalake'
     elif hp.task == "tus":
-        ds_path = 'data/table-union-search-benchmark/small/benchmark'
+        ds_path = 'data/tus/datalake'  
     elif hp.task == "tusLarge":
-        ds_path = 'data/table-union-search-benchmark/large/benchmark'
+        ds_path = 'data/tusLarge/datalake'
     elif hp.task == "wdc":
         ds_path = 'data/wdc/0'
     dataset = PretrainTableDataset.from_hp(ds_path, hp)

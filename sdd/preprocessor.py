@@ -125,13 +125,19 @@ def tfidfSample(column, tfidfDict, method, max_tokens):
                 idf = tfidfDict[val]
                 tokenFreq[val] = idf
                 tokenList.append(val)
-        tokenFreq = {k: v for k, v in sorted(tokenFreq.items(), key=lambda item: item[1], reverse=True)[:max_tokens]}
-        for t in tokenList:
-            if t in tokenFreq and t not in tokens:
+        
+        # Sort first by TF-IDF score (descending), then by string value for ties
+        tokenFreq = {k: v for k, v in sorted(tokenFreq.items(), key=lambda x: (-x[1], str(x[0])))[:max_tokens]}
+        
+        # Add tokens based on sorted order, maintaining uniqueness
+        seen_tokens = set()
+        for t in tokenFreq:
+            if t not in seen_tokens:
                 tokens.append(t)
-                
+                seen_tokens.add(t)
+        
     elif method == "tfidf_entity":
-        # entity level
+        # Calculate TF-IDF scores for entities
         for colVal in column.unique():
             valIdfs = []
             for val in str(colVal).split(' '):
@@ -139,15 +145,24 @@ def tfidfSample(column, tfidfDict, method, max_tokens):
             idf = sum(valIdfs)/len(valIdfs)
             tokenFreq[colVal] = idf
             tokenList.append(colVal)
-        tokenFreq = {k: v for k, v in sorted(tokenFreq.items(), key=lambda item: item[1], reverse=True)}
+        
+        # Sort first by TF-IDF score (descending), then by string value for ties
+        tokenFreq = dict(sorted(tokenFreq.items(), key=lambda x: (-x[1], str(x[0]))))
+        
+        # Select entities until max_tokens
         valCount, N = 0, 0
         for entity in tokenFreq:
             valCount += len(str(entity).split(' '))
             if valCount < max_tokens: N += 1
         tokenFreq = {k: tokenFreq[k] for k in list(tokenFreq)[:N]}
-        for t in tokenList:
-            if t in tokenFreq and t not in tokens:
-                tokens += str(t).split(' ')
+        
+        # Add tokens based on sorted order, maintaining uniqueness
+        seen_tokens = set()
+        for t in tokenFreq:
+            for token in str(t).split(' '):
+                if token not in seen_tokens:
+                    tokens.append(token)
+                    seen_tokens.add(token)
     return tokens
 
 

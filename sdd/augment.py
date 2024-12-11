@@ -11,6 +11,8 @@ def augment(table: pd.DataFrame, op: str):
     Return:
         DataFrame: the augmented table
     """
+    if op == 'none':
+        return table.copy()
     if op == 'drop_col':
         # set values of a random column to 0
         col = random.choice(table.columns)

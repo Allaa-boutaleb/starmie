@@ -187,9 +187,13 @@ class PretrainTableDataset(data.Dataset):
         if table_id in self.table_cache:
             table = self.table_cache[table_id]
         else:
-            fn = os.path.join(self.path, self.tables[table_id])
-            table = pd.read_csv(fn, lineterminator='\n')
-            self.table_cache[table_id] = table
+            try:
+                fn = os.path.join(self.path, self.tables[table_id])
+                table = pd.read_csv(fn, lineterminator='\n')
+                self.table_cache[table_id] = table
+            except:
+                print(f"Warning: Skipping problematic table {table_id}")
+                return None
 
         return table
 
@@ -277,7 +281,10 @@ class PretrainTableDataset(data.Dataset):
             List of int: token ID's of the second view
         """
         table_ori = self._read_table(idx)
-
+        if table_ori is None:
+            # Try next index if current one failed
+            return self.__getitem__((idx + 1) % len(self))
+        
         # single-column mode: only keep one random column
         if self.single_column:
             col = random.choice(table_ori.columns)

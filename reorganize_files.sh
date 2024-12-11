@@ -1,0 +1,4 @@
+# python reorganize_embeddings_starmie.py santos
+python reorganize_embeddings_starmie.py tus
+python reorganize_embeddings_starmie.py tusLarge
+python reorganize_embeddings_starmie.py pylon

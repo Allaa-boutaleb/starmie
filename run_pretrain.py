@@ -7,6 +7,12 @@ import mlflow
 from sdd.dataset import PretrainTableDataset
 from sdd.pretrain import train
 
+import transformers
+transformers.logging.set_verbosity_error()
+
+import warnings
+warnings.filterwarnings("ignore", message="Some weights of the model checkpoint")
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", type=str, default="small")
@@ -49,17 +55,28 @@ if __name__ == '__main__':
         torch.cuda.manual_seed_all(seed)
 
     # Change the data paths to where the benchmarks are stored
-    if "santos" in hp.task:
-        path = 'data/%s/datalake' % hp.task
-        if hp.task == "santosLarge":
-            path = 'data/santos-benchmark/real-benchmark/datalake'
-    elif "tus" in hp.task:
-        path = 'data/table-union-search-benchmark/small/benchmark'
-        if hp.task == "tusLarge":
-            path = 'data/table-union-search-benchmark/large/benchmark'
-
+    # if "santos" in hp.task:
+    #     path = 'data/%s/datalake' % hp.task
+    #     if hp.task == "santosLarge":
+    #         path = 'data/santos-benchmark/real-benchmark/datalake'
+    # elif "tus" in hp.task:
+    #     path = 'data/table-union-search-benchmark/small/benchmark'
+    #     if hp.task == "tusLarge":
+    #         path = 'data/table-union-search-benchmark/large/benchmark'
+    if hp.task == "santos":
+        path = 'data/santos/datalake'
+    elif hp.task == "tus":
+        path = 'data/tus/datalake'
+    elif hp.task == "tusLarge":
+        path = 'data/tusLarge/datalake'
+    elif hp.task == "pylon":
+        path = 'data/pylon/datalake'
+    elif hp.task == "ugen_v1":
+        path = 'data/ugen_v1/datalake'
+    elif hp.task == "ugen_v2":
+        path = 'data/ugen_v2/datalake'
     else:
-        path = 'data/%s/tables' % hp.task
+        path = 'data/%s/datalake' % hp.task
     # trainset = PretrainTableDataset(path,
     #                      augment_op=hp.augment_op,
     #                      lm=hp.lm,
